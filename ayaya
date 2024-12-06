@@ -1,0 +1,474 @@
+import React, { useState, useRef } from "react";
+import EdgeList from "./EdgeList.jsx";
+import VisitedTable from "./VisitedTable.jsx";
+import ParentTable from "./ParentTable.jsx";
+import "./Graph.css";
+
+const Graph = () => {
+    const [graph, setGraph] = useState({});
+    const [edges, setEdges] = useState([]);
+    const [visited, setVisited] = useState({});
+    const [parents, setParents] = useState({});
+    const [positions, setPositions] = useState({});
+    const [activeEdges, setActiveEdges] = useState([]);
+    const [activeNodes, setActiveNodes] = useState([]);
+    const [isBFSRunning, setIsBFSRunning] = useState(false);
+    const [startNodeBFS, setStartNodeBFS] = useState(""); // Start node for BFS
+    const [startNodeEdge, setStartNodeEdge] = useState(""); // Start node for adding edges
+    const [endNodeEdge, setEndNodeEdge] = useState(""); // End node for adding edges
+    const [nodeToDelete, setNodeToDelete] = useState("");
+    const [currentStep, setCurrentStep] = useState(0); // To keep track of the current step
+    const [paused, setPaused] = useState(false);
+    const currentStepRef = useRef(0);
+    const intervalRef = useRef(null);  // For controlling the animation interval
+    const stepsRef = useRef([]);
+    const animateStepsRef = useRef(null);
+
+    // Generate the graph function (same as your existing code)
+    const generateGraph = () => {
+        const numNodes = 6;
+        const newGraph = {};
+        const newEdges = [];
+        const newPositions = {};
+
+        const radius = 150;
+        const centerX = 250;
+        const centerY = 200;
+
+        for (let i = 0; i < numNodes; i++) {
+            const angle = (i * 2 * Math.PI) / numNodes;
+            newPositions[i] = {
+                x: centerX + radius * Math.cos(angle),
+                y: centerY + radius * Math.sin(angle),
+            };
+            newGraph[i] = [];
+        }
+
+        for (let i = 0; i < numNodes; i++) {
+            const connections = Math.floor(Math.random() * (numNodes - 1)) + 1;
+            for (let j = 0; j < connections; j++) {
+                const target = Math.floor(Math.random() * numNodes);
+                if (!newGraph[i].includes(target) && i !== target) {
+                    newGraph[i].push(target);
+                    newGraph[target].push(i);
+                    newEdges.push([i, target]);
+                }
+            }
+        }
+
+        setGraph(newGraph);
+        setEdges(newEdges);
+        setPositions(newPositions);
+        setVisited({});
+        setParents({});
+        setActiveEdges([]);
+        setActiveNodes([]);
+        setIsBFSRunning(false);
+        setCurrentStep(0); // Reset current step when generating a new graph
+        setPaused(false); // Ensure paused is false when starting new graph
+    };
+
+    const addNode = (nodeId) => {
+        if (graph[nodeId]) {
+            alert(`Node ${nodeId} already exists!`);
+            return;
+        }
+
+        const newGraph = { ...graph, [nodeId]: [] };
+        const newPosition = {
+            x: Math.random() * 500 + 50,
+            y: Math.random() * 300 + 50,
+        };
+
+        setGraph(newGraph);
+        setPositions((prev) => ({ ...prev, [nodeId]: newPosition }));
+    };
+
+    const addEdge = (startNode, endNode) => {
+        if (!graph[startNode] || !graph[endNode]) {
+            alert(`One or both nodes (${startNode}, ${endNode}) do not exist.`);
+            return;
+        }
+        if (startNode === endNode) {
+            alert("Cannot create an edge from a node to itself.");
+            return;
+        }
+        if (graph[startNode].includes(endNode)) {
+            alert(`Edge between ${startNode} and ${endNode} already exists.`);
+            return;
+        }
+
+        const newGraph = {
+            ...graph,
+            [startNode]: [...(graph[startNode] || []), endNode],
+            [endNode]: [...(graph[endNode] || []), startNode],
+        };
+        const newEdge = [startNode, endNode];
+
+        setGraph(newGraph);
+        setEdges((prev) => [...prev, newEdge]);
+    };
+
+    const deleteNode = (nodeToDelete) => {
+        if (!graph[nodeToDelete]) {
+            alert(`Node ${nodeToDelete} does not exist.`);
+            return;
+        }
+
+        const newGraph = { ...graph };
+        const newEdges = edges.filter(
+            ([start, end]) => start !== nodeToDelete && end !== nodeToDelete
+        );
+
+        delete newGraph[nodeToDelete];
+
+        for (const node in newGraph) {
+            newGraph[node] = newGraph[node].filter(
+                (neighbor) => neighbor !== nodeToDelete
+            );
+        }
+
+        const newPositions = { ...positions };
+        delete newPositions[nodeToDelete];
+
+        setGraph(newGraph);
+        setEdges(newEdges);
+        setPositions(newPositions);
+        setVisited((prev) => {
+            const updated = { ...prev };
+            delete updated[nodeToDelete];
+            return updated;
+        });
+        setParents((prev) => {
+            const updated = { ...prev };
+            delete updated[nodeToDelete];
+            return updated;
+        });
+    };
+
+    const handleBFS = (startNode) => {
+        if (isBFSRunning || !graph[startNode]) return;
+        
+        setIsBFSRunning(true);
+        setCurrentStep(0); // Reset current step when starting BFS
+        currentStepRef.current = 0;
+        
+        const queue = [startNode];
+        const newVisited = { [startNode]: true };
+        const newParents = { [startNode]: null };
+        const steps = [];
+        const allEdges = new Set();
+        
+        // Create BFS steps
+        while (queue.length > 0) {
+            const currentNode = queue.shift();
+            steps.push({ type: "node", node: currentNode });
+        
+            graph[currentNode]?.forEach((neighbor) => {
+                if (!newVisited[neighbor]) {
+                    queue.push(neighbor);
+                    newVisited[neighbor] = true;
+                    newParents[neighbor] = currentNode;
+        
+                    const edge = [currentNode, neighbor].sort().join('-');
+                    allEdges.add(edge);
+                    steps.push({ type: "edge", edge: [currentNode, neighbor] });
+                }
+            });
+        }
+    
+        // Store newParents in state
+        setParents(newParents);
+    
+        stepsRef.current = steps;
+    
+        // Start animating from the first step
+        intervalRef.current = setInterval(() => {
+            if (paused) return;  // Don't animate if paused
+    
+            if (currentStepRef.current >= stepsRef.current.length) {
+                clearInterval(intervalRef.current); // Clear interval once steps are finished
+                setIsBFSRunning(false);  // Mark BFS as complete
+                return;
+            }
+    
+            const step = stepsRef.current[currentStepRef.current];
+            if (step.type === "node") {
+                setActiveNodes((prev) => [...prev, step.node]);
+                setVisited((prev) => ({ ...prev, [step.node]: true }));
+                setParents((prev) => ({ ...prev, [step.node]: newParents[step.node] }));
+            } else if (step.type === "edge") {
+                setActiveEdges((prev) => {
+                    const updatedEdges = new Set(prev.map((edge) => edge.join('-')));
+                    updatedEdges.add(step.edge.join('-'));
+                    return Array.from(updatedEdges).map((edge) => edge.split('-').map(Number));
+                });
+            }
+    
+            currentStepRef.current++;
+        }, 1000);  // Adjust step execution interval (in milliseconds)
+    };
+
+
+
+    // Pause BFS
+    const pauseBFS = () => {
+        setPaused(true); // Pause the BFS execution
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current); // Clear the interval
+        }
+    };
+
+    // Continue BFS
+    const continueBFS = () => {
+        setPaused(false); // Ensure paused state is false when continuing
+    
+        // Clear the previous interval before setting a new one
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+        }
+    
+        // Restart the interval to continue BFS from where it was paused
+        intervalRef.current = setInterval(() => {
+            // Check if we're done
+            if (currentStepRef.current >= stepsRef.current.length) {
+                clearInterval(intervalRef.current); // Clear interval when the BFS is done
+                setIsBFSRunning(false);  // Mark BFS as complete
+            } else {
+                const step = stepsRef.current[currentStepRef.current];
+                if (step.type === "node") {
+                    // Update active nodes and visited nodes
+                    setActiveNodes((prev) => {
+                        const updatedNodes = [...prev];
+                        if (!updatedNodes.includes(step.node)) {
+                            updatedNodes.push(step.node);
+                        }
+                        return updatedNodes;
+                    });
+    
+                    setVisited((prev) => ({
+                        ...prev,
+                        [step.node]: true,
+                    }));
+    
+                    setParents((prev) => ({
+                        ...prev,
+                        [step.node]: parents[step.node],
+                    }));
+                } else if (step.type === "edge") {
+                    // Update active edges
+                    setActiveEdges((prev) => {
+                        const updatedEdges = new Set(prev.map((edge) => edge.join('-')));
+                        updatedEdges.add(step.edge.join('-'));
+                        return Array.from(updatedEdges).map((edge) => edge.split('-').map(Number));
+                    });
+                }
+    
+                currentStepRef.current++;
+            }
+        }, 1000); // Step execution every second
+    };
+
+    // Stop BFS
+    const stopBFS = () => {
+        setIsBFSRunning(false);
+        setPaused(false);
+        currentStepRef.current = 0; // Reset current step to 0
+        setActiveEdges([]);  // Clear active edges
+        setActiveNodes([]);  // Clear active nodes
+        setVisited({});  // Clear visited nodes
+        setParents({});  // Clear parent nodes
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current); // Clear any ongoing intervals
+        }
+    };
+
+    const stepForward = () => {
+        if (currentStepRef.current < stepsRef.current.length) {
+            const step = stepsRef.current[currentStepRef.current];
+    
+            if (step.type === "node") {
+                // Handle active node
+                setActiveNodes((prev) => [...prev, step.node]);
+                setVisited((prev) => ({ ...prev, [step.node]: true }));
+                setParents((prev) => ({ ...prev, [step.node]: parents[step.node] }));
+            } else if (step.type === "edge") {
+                // Handle active edge
+                setActiveEdges((prev) => {
+                    const updatedEdges = new Set(prev.map((edge) => edge.join('-')));
+                    updatedEdges.add(step.edge.join('-'));
+                    return Array.from(updatedEdges).map((edge) => edge.split('-').map(Number));
+                });
+            }
+    
+            currentStepRef.current++;
+        }
+    };
+
+    const stepBackward = () => {
+        if (currentStepRef.current > 0) {
+            currentStepRef.current -= 1;
+
+            const step = stepsRef.current[currentStepRef.current];
+            if (step.type === "node") {
+                setActiveNodes((prev) => prev.filter((node) => node !== step.node));
+                setVisited((prev) => {
+                    const updated = { ...prev };
+                    delete updated[step.node];
+                    return updated;
+                });
+                setParents((prev) => {
+                    const updated = { ...prev };
+                    delete updated[step.node];
+                    return updated;
+                });
+            } else if (step.type === "edge") {
+                setActiveEdges((prev) => prev.filter(([s, e]) => !(s === step.edge[0] && e === step.edge[1])));
+            }
+        }
+    };
+    return (
+        <div className="graph-container">
+            <div className="graph-controls">
+                <h3>Graph Controls</h3>
+
+                {/* Введення початкової вершини для BFS */}
+                <div>
+                    <input
+                        type="text"
+                        placeholder="Start Node for BFS"
+                        value={startNodeBFS}
+                        onChange={(e) => setStartNodeBFS(e.target.value)}
+                    />
+                    <button onClick={() => handleBFS(startNodeBFS)} disabled={isBFSRunning || !startNodeBFS}>
+                        Start BFS
+                    </button>
+                </div>
+
+                {/* Pause/Continue/Stop */}
+                <div>
+                    <button onClick={pauseBFS} disabled={paused || !isBFSRunning}>Pause</button>
+                    <button onClick={continueBFS} disabled={!paused || !isBFSRunning}>Continue</button>
+                    <button onClick={stopBFS} disabled={!isBFSRunning}>Stop</button>
+                </div>
+
+                <div>
+                    <button onClick={stepBackward} disabled={currentStepRef.current === 0}>
+                        Step Backward
+                    </button>
+                    <button onClick={stepForward} disabled={currentStepRef.current >= stepsRef.current.length}>
+                        Step Forward
+                    </button>
+                </div>
+
+                {/* Add Node */}
+                <div>
+                    <input
+                        type="text"
+                        placeholder="Enter Node ID"
+                        value={startNodeEdge} // This is used for adding a node
+                        onChange={(e) => setStartNodeEdge(e.target.value)} // Update startNodeEdge on typing
+                    />
+                    <button onClick={() => addNode(startNodeEdge)}>
+                        Add Node
+                    </button>
+                </div>
+
+                {/* Add Edge */}
+                <div>
+                    <input
+                        type="text"
+                        placeholder="Start Node for Edge"
+                        value={startNodeEdge}
+                        onChange={(e) => setStartNodeEdge(e.target.value)}
+                    />
+                    <input
+                        type="text"
+                        placeholder="End Node for Edge"
+                        value={endNodeEdge}
+                        onChange={(e) => setEndNodeEdge(e.target.value)}
+                    />
+                    <button onClick={() => addEdge(startNodeEdge, endNodeEdge)}>
+                        Add Edge
+                    </button>
+                </div>
+
+                {/* Delete Node */}
+                <div>
+                    <input
+                        type="text"
+                        placeholder="Node ID to Delete"
+                        value={nodeToDelete}
+                        onChange={(e) => setNodeToDelete(e.target.value)}
+                    />
+                    <button onClick={() => deleteNode(nodeToDelete)}>
+                        Delete Node
+                    </button>
+                </div>
+            </div>
+
+            <button onClick={generateGraph}>Generate Random Graph</button>
+
+            <div className="graph-visualization">
+                <svg width="600" height="400" className="graph-svg">
+                    {/* Ребра */}
+                    {edges.map(([start, end], index) => {
+                        const isActive = activeEdges.some(
+                            ([s, e]) =>
+                                (s === start && e === end) || (s === end && e === start)
+                        );
+                        return (
+                            <line
+                                key={index}
+                                x1={positions[start]?.x}
+                                y1={positions[start]?.y}
+                                x2={positions[end]?.x}
+                                y2={positions[end]?.y}
+                                stroke={isActive ? "red" : "black"}
+                                strokeWidth={isActive ? "4" : "2"}
+                                style={{
+                                    transition: "all 0.5s ease",
+                                }}
+                            />
+                        );
+                    })}
+
+                    {/* Вузли */}
+                    {Object.keys(positions).map((node) => {
+                        const isActiveNode = activeNodes.includes(Number(node));
+                        return (
+                            <g key={node}>
+                                <circle
+                                    cx={positions[node]?.x}
+                                    cy={positions[node]?.y}
+                                    r="20"
+                                    fill={isActiveNode ? "green" : visited[node] ? "green" : "skyblue"}
+                                    stroke="black"
+                                    strokeWidth="2"
+                                />
+                                <text
+                                    x={positions[node]?.x}
+                                    y={positions[node]?.y}
+                                    textAnchor="middle"
+                                    dy=".3em"
+                                    fill="black"
+                                    fontSize="14px"
+                                >
+                                    {node}
+                                </text>
+                            </g>
+                        );
+                    })}
+                </svg>
+            </div>
+
+            <div className="graph-sections">
+                <EdgeList edges={edges} />
+                <VisitedTable visited={visited} />
+                <ParentTable parents={parents} />
+            </div>
+        </div>
+    );
+};
+
+export default Graph;
